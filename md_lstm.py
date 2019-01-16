@@ -1,7 +1,6 @@
 import tensorflow as tf
 from tensorflow.contrib.rnn import RNNCell, LSTMStateTuple
 from tensorflow.contrib.rnn.python.ops.core_rnn_cell import _linear
-from tensorflow.python.ops.rnn import dynamic_rnn
 
 
 def ln(tensor, scope=None, epsilon=1e-5):
