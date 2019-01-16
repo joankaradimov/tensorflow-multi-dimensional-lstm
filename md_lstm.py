@@ -76,17 +76,16 @@ class MdRnnWhileLoop:
     def __init__(self):
         pass
 
-    def __call__(self, rnn_size, input_data, sh, dims=None, scope_n="layer1"):
+    def __call__(self, rnn_size, input_data, dims=None, scope_n="layer1"):
         """Implements naive multi dimension recurrent neural networks
 
         @param rnn_size: the hidden units
-        @param input_data: the data to process of shape [batch,h,w,channels]
-        @param sh: [height,width] of the windows
+        @param input_data: the data to process of shape [batch,h,w,features]
         @param dims: dimensions to reverse the input data,eg.
             dims=[False,True,True,False] => true means reverse dimension
         @param scope_n : the scope
 
-        returns [batch,h/sh[0],w/sh[1],rnn_size] the output of the lstm
+        returns [batch,h,w,rnn_size] the output of the lstm
         """
 
         with tf.variable_scope("MultiDimensionalLSTMCell-" + scope_n):
@@ -94,36 +93,10 @@ class MdRnnWhileLoop:
             # Create multidimensional cell with selected size
             self.cell = MultiDimensionalLSTMCell(rnn_size)
 
-            # Get the shape of the input (batch_size, x, y, channels)
-            batch_size, X_dim, Y_dim, channels = input_data.shape.as_list()
-            # Window size
-            X_win, Y_win = sh
+            # Get the shape of the input (batch_size, x, y, features)
+            batch_size, self.h, self.w, features = input_data.shape.as_list()
             # Get the runtime batch size
             batch_size_runtime = tf.shape(input_data)[0]
-
-            # If the input cannot be exactly sampled by the window, we patch it with zeros
-            if X_dim % X_win != 0:
-                # Get offset size
-                offset = tf.zeros([batch_size_runtime, X_win - (X_dim % X_win), Y_dim, channels])
-                # Concatenate X dimension
-                input_data = tf.concat(axis=1, values=[input_data, offset])
-                # Update shape value
-                X_dim = input_data.shape[1].value
-
-            # The same but for Y axis
-            if Y_dim % Y_win != 0:
-                # Get offset size
-                offset = tf.zeros([batch_size_runtime, X_dim, Y_win - (Y_dim % Y_win), channels])
-                # Concatenate Y dimension
-                input_data = tf.concat(axis=2, values=[input_data, offset])
-                # Update shape value
-                Y_dim = input_data.shape[2].value
-
-            # Get the steps to perform in X and Y axis
-            self.h, self.w = int(X_dim / X_win), int(Y_dim / Y_win)
-
-            # Get the number of features (total number of input values per step)
-            features = Y_win * X_win * channels
 
             # Reshape input data to a tensor containing the step indexes and features inputs
             # The batch size is inferred from the tensor size
@@ -221,8 +194,8 @@ class MdRnnWhileLoop:
         return time_ + 1, outputs_ta_, states_ta_
 
 
-def multi_dimensional_rnn_while_loop(rnn_size, input_data, sh, dims=None, scope_n="layer1"):
-    return MdRnnWhileLoop()(rnn_size, input_data, sh, dims, scope_n)
+def multi_dimensional_rnn_while_loop(rnn_size, input_data, dims=None, scope_n="layer1"):
+    return MdRnnWhileLoop()(rnn_size, input_data, dims, scope_n)
 
 
 def horizontal_standard_lstm(input_data, rnn_size):

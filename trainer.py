@@ -81,7 +81,7 @@ def run(model_type='md_lstm', enable_plotting=True):
 
     if model_type == ModelType.MD_LSTM:
         logger.info('Using Multi Dimensional LSTM.')
-        rnn_out, _ = multi_dimensional_rnn_while_loop(rnn_size=hidden_size, input_data=x, sh=[1, 1])
+        rnn_out, _ = multi_dimensional_rnn_while_loop(rnn_size=hidden_size, input_data=x)
     elif model_type == ModelType.HORIZONTAL_SD_LSTM:
         logger.info('Using Standard LSTM.')
         rnn_out = horizontal_standard_lstm(input_data=x, rnn_size=hidden_size)
