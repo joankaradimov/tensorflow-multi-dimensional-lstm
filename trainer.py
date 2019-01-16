@@ -4,7 +4,6 @@ import argparse
 import logging
 import numpy as np
 import tensorflow.contrib.slim as slim
-from enum import Enum
 
 from data_random_short_diagonal import next_batch, visualise_mat, get_relevant_prediction_index
 from md_lstm import *
@@ -14,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 def get_script_arguments():
     parser = argparse.ArgumentParser(description='MD LSTM trainer.')
-    parser.add_argument('--model_type', required=True, type=ModelType.from_string,
-                        choices=list(ModelType), help='Model type.')
     parser.add_argument('--enable_plotting', action='store_true')
 
     args = get_arguments(parser)
@@ -42,22 +39,6 @@ class FileLogger(object):
         self._out_fp.flush()
 
 
-class ModelType(Enum):
-    MD_LSTM = 'MD_LSTM'
-    HORIZONTAL_SD_LSTM = 'HORIZONTAL_SD_LSTM'
-    SNAKE_SD_LSTM = 'SNAKE_SD_LSTM'
-
-    def __str__(self):
-        return self.value
-
-    @staticmethod
-    def from_string(s):
-        try:
-            return ModelType[s]
-        except KeyError:
-            raise ValueError()
-
-
 def get_arguments(parser: argparse.ArgumentParser):
     args = None
     try:
@@ -68,7 +49,7 @@ def get_arguments(parser: argparse.ArgumentParser):
     return args
 
 
-def run(model_type='md_lstm', enable_plotting=True):
+def run(enable_plotting=True):
     learning_rate = 0.01
     batch_size = 16
     h = 8
@@ -79,16 +60,7 @@ def run(model_type='md_lstm', enable_plotting=True):
     x = tf.placeholder(tf.float32, [batch_size, h, w, channels])
     y = tf.placeholder(tf.float32, [batch_size, h, w, channels])
 
-    if model_type == ModelType.MD_LSTM:
-        logger.info('Using Multi Dimensional LSTM.')
-        rnn_out, _ = multi_dimensional_rnn_while_loop(rnn_size=hidden_size, input_data=x)
-    elif model_type == ModelType.HORIZONTAL_SD_LSTM:
-        logger.info('Using Standard LSTM.')
-        rnn_out = horizontal_standard_lstm(input_data=x, rnn_size=hidden_size)
-    elif model_type == ModelType.SNAKE_SD_LSTM:
-        rnn_out = snake_standard_lstm(input_data=x, rnn_size=hidden_size)
-    else:
-        raise Exception('Unknown model type: {}.'.format(model_type))
+    rnn_out, _ = MdRnnWhileLoop()(rnn_size=hidden_size, input_data=x)
 
     model_out = slim.fully_connected(inputs=rnn_out,
                                      num_outputs=1,
@@ -100,10 +72,7 @@ def run(model_type='md_lstm', enable_plotting=True):
     sess = tf.Session(config=tf.ConfigProto(log_device_placement=False))
     sess.run(tf.global_variables_initializer())
 
-    fp = FileLogger('out_{}.tsv'.format(model_type), ['steps_{}'.format(model_type),
-                                                      'overall_loss_{}'.format(model_type),
-                                                      'time_{}'.format(model_type),
-                                                      'relevant_loss_{}'.format(model_type)])
+    fp = FileLogger('out.tsv', ['steps', 'overall_loss', 'time', 'relevant_loss'])
     steps = 1000
     for i in range(steps):
         batch = next_batch(batch_size, h, w)
@@ -144,7 +113,7 @@ def run(model_type='md_lstm', enable_plotting=True):
 def main():
     args = get_script_arguments()
     logging.basicConfig(format='%(asctime)12s - %(levelname)s - %(message)s', level=logging.INFO)
-    run(args.model_type, args.enable_plotting)
+    run(args.enable_plotting)
 
 
 if __name__ == '__main__':

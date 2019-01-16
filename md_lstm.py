@@ -192,31 +192,3 @@ class MdRnnWhileLoop:
 
         # Return outputs and incremented time step
         return time_ + 1, outputs_ta_, states_ta_
-
-
-def multi_dimensional_rnn_while_loop(rnn_size, input_data, dims=None, scope_n="layer1"):
-    return MdRnnWhileLoop()(rnn_size, input_data, dims, scope_n)
-
-
-def horizontal_standard_lstm(input_data, rnn_size):
-    # input is (b, h, w, c)
-    b, h, w, c = input_data.shape.as_list()
-    # transpose = swap h and w.
-    new_input_data = tf.reshape(input_data, (b * h, w, c))  # horizontal.
-    rnn_out, _ = dynamic_rnn(tf.contrib.rnn.LSTMCell(rnn_size),
-                             inputs=new_input_data,
-                             dtype=tf.float32)
-    rnn_out = tf.reshape(rnn_out, (b, h, w, rnn_size))
-    return rnn_out
-
-
-def snake_standard_lstm(input_data, rnn_size):
-    # input is (b, h, w, c)
-    b, h, w, c = input_data.shape.as_list()
-    # transpose = swap h and w.
-    new_input_data = tf.reshape(input_data, (b, w * h, c))  # snake.
-    rnn_out, _ = dynamic_rnn(tf.contrib.rnn.LSTMCell(rnn_size),
-                             inputs=new_input_data,
-                             dtype=tf.float32)
-    rnn_out = tf.reshape(rnn_out, (b, h, w, rnn_size))
-    return rnn_out
