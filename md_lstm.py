@@ -72,148 +72,157 @@ class MultiDimensionalLSTMCell(RNNCell):
             return new_h, new_state
 
 
+class MdRnnWhileLoop:
+    def __init__(self):
+        pass
+
+    def __call__(self, rnn_size, input_data, sh, dims=None, scope_n="layer1"):
+        """Implements naive multi dimension recurrent neural networks
+
+        @param rnn_size: the hidden units
+        @param input_data: the data to process of shape [batch,h,w,channels]
+        @param sh: [height,width] of the windows
+        @param dims: dimensions to reverse the input data,eg.
+            dims=[False,True,True,False] => true means reverse dimension
+        @param scope_n : the scope
+
+        returns [batch,h/sh[0],w/sh[1],rnn_size] the output of the lstm
+        """
+
+        with tf.variable_scope("MultiDimensionalLSTMCell-" + scope_n):
+
+            # Create multidimensional cell with selected size
+            self.cell = MultiDimensionalLSTMCell(rnn_size)
+
+            # Get the shape of the input (batch_size, x, y, channels)
+            batch_size, X_dim, Y_dim, channels = input_data.shape.as_list()
+            # Window size
+            X_win, Y_win = sh
+            # Get the runtime batch size
+            batch_size_runtime = tf.shape(input_data)[0]
+
+            # If the input cannot be exactly sampled by the window, we patch it with zeros
+            if X_dim % X_win != 0:
+                # Get offset size
+                offset = tf.zeros([batch_size_runtime, X_win - (X_dim % X_win), Y_dim, channels])
+                # Concatenate X dimension
+                input_data = tf.concat(axis=1, values=[input_data, offset])
+                # Update shape value
+                X_dim = input_data.shape[1].value
+
+            # The same but for Y axis
+            if Y_dim % Y_win != 0:
+                # Get offset size
+                offset = tf.zeros([batch_size_runtime, X_dim, Y_win - (Y_dim % Y_win), channels])
+                # Concatenate Y dimension
+                input_data = tf.concat(axis=2, values=[input_data, offset])
+                # Update shape value
+                Y_dim = input_data.shape[2].value
+
+            # Get the steps to perform in X and Y axis
+            self.h, self.w = int(X_dim / X_win), int(Y_dim / Y_win)
+
+            # Get the number of features (total number of input values per step)
+            features = Y_win * X_win * channels
+
+            # Reshape input data to a tensor containing the step indexes and features inputs
+            # The batch size is inferred from the tensor size
+            x = tf.reshape(input_data, [batch_size_runtime, self.h, self.w, features])
+
+            # Reverse the selected dimensions
+            if dims is not None:
+                assert dims[0] is False and dims[3] is False
+                x = tf.reverse(x, dims)
+
+            # Reorder inputs to (h, w, batch_size, features)
+            x = tf.transpose(x, [1, 2, 0, 3])
+            # Reshape to a one dimensional tensor of (h*w*batch_size , features)
+            x = tf.reshape(x, [-1, features])
+            # Split tensor into h*w tensors of size (batch_size , features)
+            x = tf.split(axis=0, num_or_size_splits=self.h * self.w, value=x)
+
+            # Create an input tensor array (literally an array of tensors) to use inside the loop
+            inputs_ta = tf.TensorArray(dtype=tf.float32, size=self.h * self.w, name='input_ta')
+            # Unstack the input X in the tensor array
+            self.inputs_ta = inputs_ta.unstack(x)
+            # Create an input tensor array for the states
+            states_ta = tf.TensorArray(dtype=tf.float32, size=self.h * self.w + 1, name='state_ta', clear_after_read=False)
+            # And an other for the output
+            outputs_ta = tf.TensorArray(dtype=tf.float32, size=self.h * self.w, name='output_ta')
+
+            # initial cell hidden states
+            # Write to the last position of the array, the LSTMStateTuple filled with zeros
+            states_ta = states_ta.write(self.h * self.w, LSTMStateTuple(tf.zeros([batch_size_runtime, rnn_size], tf.float32),
+                                                              tf.zeros([batch_size_runtime, rnn_size], tf.float32)))
+
+            # Controls the initial index
+            time = tf.constant(0)
+            self.zero = tf.constant(0)
+
+            # Run the looped operation
+            result, outputs_ta, states_ta = tf.while_loop(self.condition, self.body, [time, outputs_ta, states_ta],
+                                                          parallel_iterations=1)
+
+            # Extract the output tensors from the processesed tensor array
+            outputs = outputs_ta.stack()
+            states = states_ta.stack()
+
+            # Reshape outputs to match the shape of the input
+            y = tf.reshape(outputs, [self.h, self.w, batch_size_runtime, rnn_size])
+
+            # Reorder te dimensions to match the input
+            y = tf.transpose(y, [2, 0, 1, 3])
+            # Reverse if selected
+            if dims is not None:
+                y = tf.reverse(y, dims)
+
+            # Return the output and the inner states
+            return y, states
+
+    def condition(self, time_, outputs_ta_, states_ta_):
+        """Loop output condition. The index, given by the time, should be less than the
+        total number of steps defined within the image
+        """
+        return tf.less(time_, tf.constant(self.h * self.w))
+
+    def get_up(self, t_, w_):
+        """Function to get the sample skipping one row"""
+        return t_ - tf.constant(w_)
+
+    def get_last(self, t_, w_):
+        """Function to get the previous sample"""
+        return t_ - tf.constant(1)
+
+    def body(self, time_, outputs_ta_, states_ta_):
+        """Body of the while loop operation that applies the MD LSTM"""
+
+        # If the current position is less or equal than the width, we are in the first row
+        # and we need to read the zero state we added in row (h*w).
+        # If not, get the sample located at a width distance.
+        state_up = tf.cond(tf.less_equal(time_, tf.constant(self.w)),
+                           lambda: states_ta_.read(self.h * self.w),
+                           lambda: states_ta_.read(self.get_up(time_, self.w)))
+
+        # If it is the first step we read the zero state if not we read the immediate last
+        state_last = tf.cond(tf.less(self.zero, tf.mod(time_, tf.constant(self.w))),
+                             lambda: states_ta_.read(self.get_last(time_, self.w)),
+                             lambda: states_ta_.read(self.h * self.w))
+
+        # We build the input state in both dimensions
+        current_state = state_up[0], state_last[0], state_up[1], state_last[1]
+        # Now we calculate the output state and the cell output
+        out, state = self.cell(self.inputs_ta.read(time_), current_state)
+        # We write the output to the output tensor array
+        outputs_ta_ = outputs_ta_.write(time_, out)
+        # And save the output state to the state tensor array
+        states_ta_ = states_ta_.write(time_, state)
+
+        # Return outputs and incremented time step
+        return time_ + 1, outputs_ta_, states_ta_
+
+
 def multi_dimensional_rnn_while_loop(rnn_size, input_data, sh, dims=None, scope_n="layer1"):
-    """Implements naive multi dimension recurrent neural networks
-
-    @param rnn_size: the hidden units
-    @param input_data: the data to process of shape [batch,h,w,channels]
-    @param sh: [height,width] of the windows
-    @param dims: dimensions to reverse the input data,eg.
-        dims=[False,True,True,False] => true means reverse dimension
-    @param scope_n : the scope
-
-    returns [batch,h/sh[0],w/sh[1],rnn_size] the output of the lstm
-    """
-
-    with tf.variable_scope("MultiDimensionalLSTMCell-" + scope_n):
-
-        # Create multidimensional cell with selected size
-        cell = MultiDimensionalLSTMCell(rnn_size)
-
-        # Get the shape of the input (batch_size, x, y, channels)
-        batch_size, X_dim, Y_dim, channels = input_data.shape.as_list()
-        # Window size
-        X_win, Y_win = sh
-        # Get the runtime batch size
-        batch_size_runtime = tf.shape(input_data)[0]
-
-        # If the input cannot be exactly sampled by the window, we patch it with zeros
-        if X_dim % X_win != 0:
-            # Get offset size
-            offset = tf.zeros([batch_size_runtime, X_win - (X_dim % X_win), Y_dim, channels])
-            # Concatenate X dimension
-            input_data = tf.concat(axis=1, values=[input_data, offset])
-            # Update shape value
-            X_dim = input_data.shape[1].value
-
-        # The same but for Y axis
-        if Y_dim % Y_win != 0:
-            # Get offset size
-            offset = tf.zeros([batch_size_runtime, X_dim, Y_win - (Y_dim % Y_win), channels])
-            # Concatenate Y dimension
-            input_data = tf.concat(axis=2, values=[input_data, offset])
-            # Update shape value
-            Y_dim = input_data.shape[2].value
-
-        # Get the steps to perform in X and Y axis
-        h, w = int(X_dim / X_win), int(Y_dim / Y_win)
-
-        # Get the number of features (total number of input values per step)
-        features = Y_win * X_win * channels
-
-        # Reshape input data to a tensor containing the step indexes and features inputs
-        # The batch size is inferred from the tensor size
-        x = tf.reshape(input_data, [batch_size_runtime, h, w, features])
-
-        # Reverse the selected dimensions
-        if dims is not None:
-            assert dims[0] is False and dims[3] is False
-            x = tf.reverse(x, dims)
-
-        # Reorder inputs to (h, w, batch_size, features)
-        x = tf.transpose(x, [1, 2, 0, 3])
-        # Reshape to a one dimensional tensor of (h*w*batch_size , features)
-        x = tf.reshape(x, [-1, features])
-        # Split tensor into h*w tensors of size (batch_size , features)
-        x = tf.split(axis=0, num_or_size_splits=h * w, value=x)
-
-        # Create an input tensor array (literally an array of tensors) to use inside the loop
-        inputs_ta = tf.TensorArray(dtype=tf.float32, size=h * w, name='input_ta')
-        # Unstack the input X in the tensor array
-        inputs_ta = inputs_ta.unstack(x)
-        # Create an input tensor array for the states
-        states_ta = tf.TensorArray(dtype=tf.float32, size=h * w + 1, name='state_ta', clear_after_read=False)
-        # And an other for the output
-        outputs_ta = tf.TensorArray(dtype=tf.float32, size=h * w, name='output_ta')
-
-        # initial cell hidden states
-        # Write to the last position of the array, the LSTMStateTuple filled with zeros
-        states_ta = states_ta.write(h * w, LSTMStateTuple(tf.zeros([batch_size_runtime, rnn_size], tf.float32),
-                                                          tf.zeros([batch_size_runtime, rnn_size], tf.float32)))
-
-        # Function to get the sample skipping one row
-        def get_up(t_, w_):
-            return t_ - tf.constant(w_)
-
-        # Function to get the previous sample
-        def get_last(t_, w_):
-            return t_ - tf.constant(1)
-
-        # Controls the initial index
-        time = tf.constant(0)
-        zero = tf.constant(0)
-
-        # Body of the while loop operation that applies the MD LSTM
-        def body(time_, outputs_ta_, states_ta_):
-
-            # If the current position is less or equal than the width, we are in the first row
-            # and we need to read the zero state we added in row (h*w). 
-            # If not, get the sample located at a width distance.
-            state_up = tf.cond(tf.less_equal(time_, tf.constant(w)),
-                               lambda: states_ta_.read(h * w),
-                               lambda: states_ta_.read(get_up(time_, w)))
-
-            # If it is the first step we read the zero state if not we read the immediate last
-            state_last = tf.cond(tf.less(zero, tf.mod(time_, tf.constant(w))),
-                                 lambda: states_ta_.read(get_last(time_, w)),
-                                 lambda: states_ta_.read(h * w))
-
-            # We build the input state in both dimensions
-            current_state = state_up[0], state_last[0], state_up[1], state_last[1]
-            # Now we calculate the output state and the cell output
-            out, state = cell(inputs_ta.read(time_), current_state)
-            # We write the output to the output tensor array
-            outputs_ta_ = outputs_ta_.write(time_, out)
-            # And save the output state to the state tensor array
-            states_ta_ = states_ta_.write(time_, state)
-
-            # Return outputs and incremented time step 
-            return time_ + 1, outputs_ta_, states_ta_
-
-        # Loop output condition. The index, given by the time, should be less than the
-        # total number of steps defined within the image
-        def condition(time_, outputs_ta_, states_ta_):
-            return tf.less(time_, tf.constant(h * w))
-
-        # Run the looped operation
-        result, outputs_ta, states_ta = tf.while_loop(condition, body, [time, outputs_ta, states_ta],
-                                                      parallel_iterations=1)
-
-        # Extract the output tensors from the processesed tensor array
-        outputs = outputs_ta.stack()
-        states = states_ta.stack()
-
-        # Reshape outputs to match the shape of the input
-        y = tf.reshape(outputs, [h, w, batch_size_runtime, rnn_size])
-
-        # Reorder te dimensions to match the input
-        y = tf.transpose(y, [2, 0, 1, 3])
-        # Reverse if selected
-        if dims is not None:
-            y = tf.reverse(y, dims)
-
-        # Return the output and the inner states
-        return y, states
+    return MdRnnWhileLoop()(rnn_size, input_data, sh, dims, scope_n)
 
 
 def horizontal_standard_lstm(input_data, rnn_size):
