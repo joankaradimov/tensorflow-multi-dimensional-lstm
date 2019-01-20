@@ -72,7 +72,7 @@ def run(enable_plotting=True):
     sess = tf.Session(config=tf.ConfigProto(log_device_placement=False))
     sess.run(tf.global_variables_initializer())
 
-    fp = FileLogger('out.tsv', ['steps', 'overall_loss', 'time', 'relevant_loss'])
+    fp = FileLogger('out.tsv', ['steps', 'overall_loss', 'time'])
     steps = 1000
     for i in range(steps):
         batch = next_batch(batch_size, h, w)
@@ -93,14 +93,8 @@ def run(enable_plotting=True):
                         whereas a MD LSTM (which can see all the TOP LEFT corner) should perform well. 
         """
 
-        # extract the predictions for the second x
-        relevant_pred_index = get_relevant_prediction_index(batch_y)
-        true_rel = np.array([batch_y[i, x, y, 0] for (i, (y, x)) in enumerate(relevant_pred_index)])
-        pred_rel = np.array([model_preds[i, x, y, 0] for (i, (y, x)) in enumerate(relevant_pred_index)])
-        relevant_loss = np.mean(np.square(true_rel - pred_rel))
-
-        values = [str(i).zfill(4), tot_loss_value, time() - grad_step_start_time, relevant_loss]
-        format_str = 'steps = {0} | overall loss = {1:.3f} | time {2:.3f} | relevant loss = {3:.3f}'
+        values = [str(i).zfill(4), tot_loss_value, time() - grad_step_start_time]
+        format_str = 'steps = {0} | overall loss = {1:.3f} | time {2:.3f}'
         logger.info(format_str.format(*values))
         fp.write(values)
 
