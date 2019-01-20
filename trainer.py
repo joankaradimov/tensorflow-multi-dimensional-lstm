@@ -80,7 +80,10 @@ def run(enable_plotting=True):
         batch_x = np.expand_dims(batch[0], axis=3)
         batch_y = np.expand_dims(batch[1], axis=3)
 
-        model_preds, tot_loss_value, _ = sess.run([model_out, loss, grad_update], feed_dict={x: batch_x, y: batch_y})
+        model_preds, tot_loss_value, _ = sess.run([model_out, loss, grad_update], feed_dict={
+            x: batch_x,
+            y: batch_y,
+        })
 
         """
         ____________
