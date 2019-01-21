@@ -80,10 +80,6 @@ def run():
         fp.write(values)
 
 
-def main():
+if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)12s - %(levelname)s - %(message)s', level=logging.INFO)
     run()
-
-
-if __name__ == '__main__':
-    main()
