@@ -1,6 +1,5 @@
 from time import time
 
-import argparse
 import logging
 import numpy as np
 import tensorflow.contrib.slim as slim
