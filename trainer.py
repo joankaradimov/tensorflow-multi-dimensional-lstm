@@ -42,9 +42,7 @@ def run():
 
     rnn_out, _ = MdRnnWhileLoop()(rnn_size=hidden_size, input_data=x)
 
-    model_out = slim.fully_connected(inputs=rnn_out,
-                                     num_outputs=1,
-                                     activation_fn=tf.nn.sigmoid)
+    model_out = slim.fully_connected(inputs=rnn_out, num_outputs=1, activation_fn=tf.nn.sigmoid)
 
     loss = tf.reduce_mean(tf.square(y - model_out))
     grad_update = tf.train.AdamOptimizer(learning_rate).minimize(loss)
