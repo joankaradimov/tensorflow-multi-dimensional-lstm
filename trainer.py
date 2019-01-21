@@ -11,15 +11,6 @@ from md_lstm import *
 logger = logging.getLogger(__name__)
 
 
-def get_script_arguments():
-    parser = argparse.ArgumentParser(description='MD LSTM trainer.')
-    parser.add_argument('--enable_plotting', action='store_true')
-
-    args = get_arguments(parser)
-    logger.info('Script inputs: {}.'.format(args))
-    return args
-
-
 class FileLogger(object):
     def __init__(self, full_filename, headers):
         self._headers = headers
@@ -39,17 +30,7 @@ class FileLogger(object):
         self._out_fp.flush()
 
 
-def get_arguments(parser: argparse.ArgumentParser):
-    args = None
-    try:
-        args = parser.parse_args()
-    except Exception:
-        parser.print_help()
-        exit(1)
-    return args
-
-
-def run(enable_plotting=True):
+def run():
     learning_rate = 0.01
     batch_size = 16
     h = 8
@@ -101,16 +82,10 @@ def run(enable_plotting=True):
         logger.info(format_str.format(*values))
         fp.write(values)
 
-        display_matplotlib_every = 500
-        if enable_plotting and i % display_matplotlib_every == 0 and i != 0:
-            visualise_mat(sess.run(model_out, feed_dict={x: batch_x})[0].squeeze())
-            visualise_mat(batch_y[0].squeeze())
-
 
 def main():
-    args = get_script_arguments()
     logging.basicConfig(format='%(asctime)12s - %(levelname)s - %(message)s', level=logging.INFO)
-    run(args.enable_plotting)
+    run()
 
 
 if __name__ == '__main__':
